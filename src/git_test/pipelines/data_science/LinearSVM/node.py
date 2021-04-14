@@ -1,64 +1,74 @@
+import os
+from typing import Any, Dict, List
 import pandas as pd
-from sklearn import preprocessing
+import numpy as np
+import logging
+from datetime import datetime
+
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import accuracy_score
+from sklearn.svm import LinearSVC
+
+import mlflow
 
 
-def _label_encoding(df: pd.DataFrame) -> (pd.DataFrame, dict):
+def split_data(data: pd.DataFrame, parameters: Dict) -> List:
+    """Splits data into training and test sets.
+        Args:
+            data: Source data.
+            parameters: Parameters defined in parameters.yml.
+        Returns:
+            A list containing split data.
+    """
+    target_col = 'Survived'
+    X = data.drop(target_col, axis=1).values
+    y = data[target_col].values
 
-    df_le = df.copy()
-    list_columns_object = df_le.columns[df_le.dtypes == 'object']
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=parameters["test_size"], random_state=parameters["random_state"]
+    )
 
-    dict_encoders = {}
-    for column in list_columns_object:
-        le = preprocessing.LabelEncoder()
-        mask_nan = df_le[column].isnull()
-        df_le[column] = le.fit_transform(df_le[column].fillna('NaN'))
-
-        df_le.loc[mask_nan, column] *= -1
-        dict_encoders[column] = le
-
-    return df_le, dict_encoders
-
-
-def _drop_columns(df: pd.DataFrame) -> pd.DataFrame:
-    df_prep = df.copy()
-    drop_cols = ['Name', 'Ticket', 'PassengerId']
-    df_prep = df_prep.drop(drop_cols, axis=1)
-    return df_prep
+    return [X_train, X_test, y_train, y_test]
 
 
-def _process_Age_column(series: pd.Series) -> pd.Series:
-    series_prep = series.copy()
-    series_prep = series_prep.fillna(series_prep.mean())
-    return series_prep
+def train_model(X_train: np.ndarray, y_train: np.ndarray, parameters: Dict[str, Any]) -> LinearSVC:
+
+    train_x, valid_x, train_y, valid_y = train_test_split(X_train,
+                                                          y_train,
+                                                          test_size=parameters['test_size'],
+                                                          random_state=parameters['random_state'])
+
+    model = LinearSVC(C=0.1).fit(train_x, train_y)
+    return model
 
 
-def _process_Embarked_column(series: pd.Series) -> pd.Series:
-    series_prep = series.copy()
-    series_prep = series_prep.fillna(series_prep.mode()[0])
-    return series_prep
+def evaluate_model(model: LinearSVC, X_test: np.ndarray, y_test: np.ndarray, parameters: Dict[str, Any]):
+    """Calculate the F1 score and log the result.
+        Args:
+            model: Trained model.
+            X_test: Testing data of independent features.
+            y_test: Testing data for price.
+    """
 
+    prediction = model.predict(X_test)
+    prediction = np.where(prediction < 0.5, 0, 1)
+    score = round(accuracy_score(y_test, prediction), 3)
 
-def _process_Pclass_column(series: pd.Series) -> pd.Series:
-    series_prep = series.copy()
-    series_prep = series_prep.astype(str)
-    return series_prep
+    logger = logging.getLogger(__name__)
+    logger.info("accuracy score : %.3f.", score)
 
+    file_path = os.path.abspath(__file__).split('/')
+    model_name = file_path[-2]
+    runName = datetime.now().strftime('%Y%m%d%H%M%S')
+    mlflow.start_run(run_name=runName, nested=True)
+    mlflow.log_metric("accuracy_score", score)
+    mlflow.log_param("test_size",
+                     parameters['test_size'])
 
-def _process_Cabin_column(series: pd.Series) -> pd.Series:
-    series_prep = series.copy()
-    series_prep = series_prep.str[0]
-    return series_prep
+    mlflow.log_param("random_state",
+                     parameters['random_state'])
 
+    mlflow.log_param("model_name",
+                     model_name)
 
-def preprocess(df: pd.DataFrame) -> pd.DataFrame:
-    df_prep = df.copy()
-
-    df_prep = _drop_columns(df_prep)
-    df_prep['Age'] = _process_Age_column(df_prep['Age'])
-    df_prep['Embarked'] = _process_Embarked_column(df_prep['Embarked'])
-    df_prep['Pclass'] = _process_Pclass_column(df_prep['Pclass'])
-    df_prep['Cabin'] = _process_Cabin_column(df_prep['Cabin'])
-
-    df_prep, _ = _label_encoding(df_prep)
-
-    return df_prep
+    mlflow.end_run()
