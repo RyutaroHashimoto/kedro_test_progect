@@ -32,14 +32,36 @@ from typing import Any, Dict, Iterable, Optional
 from kedro.config import ConfigLoader
 from kedro.framework.hooks import hook_impl
 from kedro.io import DataCatalog
+from kedro.pipeline import Pipeline
 from kedro.versioning import Journal
+
+from git_test.pipelines.data_engineering import pipeline as de
+from git_test.pipelines.data_science.LinearSVM import pipeline as ds
 
 
 class ProjectHooks:
     @hook_impl
-    def register_config_loader(
-        self, conf_paths: Iterable[str], env: str, extra_params: Dict[str, Any],
-    ) -> ConfigLoader:
+    def register_pipelines(self) -> Dict[str, Pipeline]:
+        """Register the project's pipeline.
+
+        Returns:
+            A mapping from a pipeline name to a ``Pipeline`` object.
+
+        """
+
+        #=====================変更箇所=======================
+        de_pipline = de.create_pipeline()
+        ds_pipline = ds.create_pipeline()
+
+        return {
+            "de": de_pipline,
+            "ds": ds_pipline,
+            "__default__": de_pipline + ds_pipline,
+        }
+        #===================================================
+
+    @hook_impl
+    def register_config_loader(self, conf_paths: Iterable[str]) -> ConfigLoader:
         return ConfigLoader(conf_paths)
 
     @hook_impl
@@ -54,3 +76,6 @@ class ProjectHooks:
         return DataCatalog.from_config(
             catalog, credentials, load_versions, save_version, journal
         )
+
+
+project_hooks = ProjectHooks()
